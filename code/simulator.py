@@ -2,10 +2,11 @@
 import numpy as np
 # import pandas as pd
 from scipy import integrate
+import copy
 
 
 class LinearSystemSimulator:
-    def __init__(self, A, B, C=None, D=None):
+    def __init__(self, A, B, C=None, D=None, system_type='continuous', measurement_type='linear'):
         self.A = np.array(A)  # system matrix
         self.B = np.array(B)  # input matrix
 
@@ -20,6 +21,9 @@ class LinearSystemSimulator:
 
         self.p, self.n = C.shape  # [# of outputs, # of states]
         self.m = B.shape[0]  # of inputs
+
+        self.system_type = system_type
+        self.measurement_type = measurement_type
 
         # To store simulation data
         self.N = []
@@ -55,9 +59,6 @@ class LinearSystemSimulator:
         x = np.transpose(x)
         xdot = (self.A @ x) + (self.B @ u)
 
-        # Current output
-        # y = (self.C @ x) + (self.D @ u)
-
         # Return the state derivative
         return np.squeeze(xdot)
 
@@ -72,17 +73,32 @@ class LinearSystemSimulator:
             self.y = np.atleast_2d(self.y[:, 0]).T  # only need 1st column
             y = x[1] * x[0]
 
+        try:
+            y = y
+        except ValueError as e:
+            print(measurement_type + ' measurement type not an option')
+
         return y
 
-    def simulate(self, x0, tsim, usim, measurement_type='linear'):
+    def simulate(self, x0, tsim, usim, measurement_type=None, system_type=None):
         self.N = len(tsim)
         self.t = np.atleast_2d(tsim).T  # simulation time vector
         self.u = np.atleast_2d(usim)  # input(s)
         self.y = np.zeros((self.N, self.p))  # preallocate output
 
-        # Solve ODE
-        self.x = integrate.odeint(self.system_ode, x0, tsim, args=(tsim, usim))
+        # Use defaults if not specified
+        if system_type is None:
+            system_type = self.system_type
 
+        if measurement_type is None:
+            measurement_type = self.measurement_type
+
+        # Solve ODE
+        if system_type == 'continuous':
+            self.x = integrate.odeint(self.system_ode, x0, tsim, args=(tsim, usim))
+        elif system_type == 'discrete':
+            self.x = self.simulate_discrete(x0, tsim, usim)
+            
         # Compute output
         for k in range(self.N):
             # self.y[k, :] = (self.C @ self.x[k, :]) + (self.D @ self.u[k, :])
@@ -96,3 +112,13 @@ class LinearSystemSimulator:
                       'y': self.y}
 
         return self.state, self.y
+    
+    def simulate_discrete(self, x0, tsim, usim):
+        x = copy.copy(x0)
+        x = np.atleast_2d(x).T
+        for k in range(len(tsim)-1):
+            u = np.atleast_2d(usim[k, :]).T
+            xnew = (self.A @ x[:, -1:]) + (self.B @ u)
+            x = np.hstack((x, xnew))
+            
+        return x.T
